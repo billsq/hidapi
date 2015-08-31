@@ -44,6 +44,7 @@ extern "C" {
 #endif
 		struct hid_device_;
 		typedef struct hid_device_ hid_device; /**< opaque hidapi structure */
+		typedef void (*raw_data_cb)(unsigned char *data, int length, void *context);
 
 		/** hidapi info structure */
 		struct hid_device_info {
@@ -263,6 +264,22 @@ extern "C" {
 		*/
 		int  HID_API_EXPORT HID_API_CALL hid_set_nonblocking(hid_device *device, int nonblock);
 
+		/** @brief Set the raw input report handler (Mac OS Only).
+
+			If raw data handler is set, no more input report will be
+			returned by hid_read().
+
+			Set callback to NULL to restore normal hid_read() behavior.
+
+			@ingroup API
+			@param device A device handle returned from hid_open().
+			@param callback the raw input report handler, NULL to disable.
+
+			@returns
+				This function returns 0 on success and -1 on error.
+		*/
+		int  HID_API_EXPORT HID_API_CALL hid_set_raw_data_handler(hid_device *device, raw_data_cb callback, void *context);
+    
 		/** @brief Send a Feature report to the device.
 
 			Feature reports are sent over the Control endpoint as a
