@@ -49,7 +49,6 @@ typedef struct pthread_barrier {
     int trip_count;
 } pthread_barrier_t;
 
-
 static int pthread_barrier_init(pthread_barrier_t *barrier, const pthread_barrierattr_t *attr, unsigned int count)
 {
 	if(count == 0) {
@@ -141,6 +140,7 @@ static hid_device *new_hid_device(void)
 	dev->input_reports = NULL;
 	dev->shutdown_thread = 0;
 	dev->raw_data_callback = NULL;
+	dev->context = NULL;
 
 	/* Thread objects */
 	pthread_mutex_init(&dev->mutex, NULL);
