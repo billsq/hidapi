@@ -29,8 +29,6 @@
 #include <wchar.h>
 #include <locale.h>
 #include <pthread.h>
-#include <Python.h>
-#include <pystate.h>
 #include <sys/time.h>
 #include <unistd.h>
 #include <dlfcn.h>
@@ -115,8 +113,6 @@ struct hid_device_ {
 	uint8_t *input_report_buf;
 	CFIndex max_input_report_len;
 	struct input_report *input_reports;
-	raw_data_cb raw_data_callback;
-	void *context;
 
 	pthread_t thread;
 	pthread_mutex_t mutex; /* Protects input_reports */
@@ -139,8 +135,6 @@ static hid_device *new_hid_device(void)
 	dev->input_report_buf = NULL;
 	dev->input_reports = NULL;
 	dev->shutdown_thread = 0;
-	dev->raw_data_callback = NULL;
-	dev->context = NULL;
 
 	/* Thread objects */
 	pthread_mutex_init(&dev->mutex, NULL);
@@ -573,47 +567,38 @@ static void hid_report_callback(void *context, IOReturn result, void *sender,
 	rpt->len = report_length;
 	rpt->next = NULL;
 
-    if (dev->raw_data_callback && dev->context) {
-		PyGILState_STATE gstate;
-		PyInterpreterState *istate = PyInterpreterState_Head();
-		PyThreadState_New(istate);
-		gstate = PyGILState_Ensure();
-		(dev->raw_data_callback)(rpt->data, rpt->len, dev->context);
-		PyGILState_Release(gstate);
-    }
-	else {
-		/* Lock this section */
-		pthread_mutex_lock(&dev->mutex);
-		
-		/* Attach the new report object to the end of the list. */
-		if (dev->input_reports == NULL) {
-			/* The list is empty. Put it at the root. */
-			dev->input_reports = rpt;
-		}
-		else {
-			/* Find the end of the list and attach. */
-			struct input_report *cur = dev->input_reports;
-			int num_queued = 0;
-			while (cur->next != NULL) {
-				cur = cur->next;
-				num_queued++;
-			}
-			cur->next = rpt;
-		
-			/* Pop one off if we've reached 30 in the queue. This
-			   way we don't grow forever if the user never reads
-			   anything from the device. */
-			if (num_queued > 30) {
-				return_data(dev, NULL, 0);
-			}
-		}
-		
-		/* Signal a waiting thread that there is data. */
-		pthread_cond_signal(&dev->condition);
-		
-		/* Unlock */
-		pthread_mutex_unlock(&dev->mutex);
+	/* Lock this section */
+	pthread_mutex_lock(&dev->mutex);
+
+	/* Attach the new report object to the end of the list. */
+	if (dev->input_reports == NULL) {
+		/* The list is empty. Put it at the root. */
+		dev->input_reports = rpt;
 	}
+	else {
+		/* Find the end of the list and attach. */
+		struct input_report *cur = dev->input_reports;
+		int num_queued = 0;
+		while (cur->next != NULL) {
+			cur = cur->next;
+			num_queued++;
+		}
+		cur->next = rpt;
+
+		/* Pop one off if we've reached 30 in the queue. This
+		   way we don't grow forever if the user never reads
+		   anything from the device. */
+		if (num_queued > 80) {
+			return_data(dev, NULL, 0);
+		}
+	}
+
+	/* Signal a waiting thread that there is data. */
+	pthread_cond_signal(&dev->condition);
+
+	/* Unlock */
+	pthread_mutex_unlock(&dev->mutex);
+
 }
 
 /* This gets called when the read_thred's run loop gets signaled by
@@ -865,7 +850,7 @@ static int cond_timedwait(const hid_device *dev, pthread_cond_t *cond, pthread_m
 int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t length, int milliseconds)
 {
 	int bytes_read = -1;
-	
+
 	/* Lock the access to the report list. */
 	pthread_mutex_lock(&dev->mutex);
 
@@ -946,13 +931,6 @@ int HID_API_EXPORT hid_set_nonblocking(hid_device *dev, int nonblock)
 	/* All Nonblocking operation is handled by the library. */
 	dev->blocking = !nonblock;
 
-	return 0;
-}
-
-int HID_API_EXPORT hid_set_raw_data_handler(hid_device *dev, raw_data_cb callback, void *context)
-{
-	dev->raw_data_callback = callback;
-  dev->context = context;
 	return 0;
 }
 
